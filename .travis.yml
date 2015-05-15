@@ -2,6 +2,7 @@ language: csharp
 branches:
   only:
     - master
+    - develop
 solution: src/Cassandra.sln
 install:
   - nuget restore src/Cassandra.sln
