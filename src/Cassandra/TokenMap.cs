@@ -25,11 +25,11 @@ namespace Cassandra
     {
         internal readonly TokenFactory Factory;
         private readonly List<IToken> _ring;
-        private readonly Dictionary<string, Dictionary<IToken, HashSet<Host>>> _tokenToHostsByKeyspace;
+        private readonly Dictionary<string, Lazy<Dictionary<IToken, HashSet<Host>>>> _tokenToHostsByKeyspace;
         private readonly Dictionary<IToken, Host> _primaryReplicas;
         private static readonly Logger _logger = new Logger(typeof(ControlConnection));
 
-        internal TokenMap(TokenFactory factory, Dictionary<string, Dictionary<IToken, HashSet<Host>>> tokenToHostsByKeyspace, List<IToken> ring, Dictionary<IToken, Host> primaryReplicas)
+        internal TokenMap(TokenFactory factory, Dictionary<string, Lazy<Dictionary<IToken, HashSet<Host>>>> tokenToHostsByKeyspace, List<IToken> ring, Dictionary<IToken, Host> primaryReplicas)
         {
             Factory = factory;
             _tokenToHostsByKeyspace = tokenToHostsByKeyspace;
@@ -76,24 +76,27 @@ namespace Cassandra
                 }
             }
             var ring = new List<IToken>(allSorted);
-            var tokenToHosts = new Dictionary<string, Dictionary<IToken, HashSet<Host>>>(keyspaces.Count);
+            var tokenToHosts = new Dictionary<string, Lazy<Dictionary<IToken, HashSet<Host>>>>(keyspaces.Count);
             foreach (var ks in keyspaces)
             {
-                Dictionary<IToken, HashSet<Host>> replicas;
-                if (ks.StrategyClass == ReplicationStrategies.SimpleStrategy)
-                {
-                    replicas = ComputeTokenToReplicaSimple(ks.Replication["replication_factor"], hosts.Count, ring, primaryReplicas);
-                }
-                else if (ks.StrategyClass == ReplicationStrategies.NetworkTopologyStrategy)
-                {
-                    replicas = ComputeTokenToReplicaNetwork(ks.Replication, ring, primaryReplicas, datacenters);
-                }
-                else
-                {
-                    //No replication information, use primary replicas
-                    replicas = primaryReplicas.ToDictionary(kv => kv.Key, kv => new HashSet<Host>(new [] { kv.Value }));   
-                }
-                tokenToHosts[ks.Name] = replicas;
+                tokenToHosts[ks.Name] = new Lazy<Dictionary<IToken, HashSet<Host>>>(() =>
+                    {
+                        Dictionary<IToken, HashSet<Host>> replicas;
+                        if (ks.StrategyClass == ReplicationStrategies.SimpleStrategy)
+                        {
+                            replicas = ComputeTokenToReplicaSimple(ks.Replication["replication_factor"], hosts.Count, ring, primaryReplicas);
+                        }
+                        else if (ks.StrategyClass == ReplicationStrategies.NetworkTopologyStrategy)
+                        {
+                            replicas = ComputeTokenToReplicaNetwork(ks.Replication, ring, primaryReplicas, datacenters);
+                        }
+                        else
+                        {
+                            //No replication information, use primary replicas
+                            replicas = primaryReplicas.ToDictionary(kv => kv.Key, kv => new HashSet<Host>(new[] { kv.Value }));
+                        }
+                        return replicas;
+                    });
             }
             return new TokenMap(factory, tokenToHosts, ring, primaryReplicas);
         }
@@ -204,9 +207,13 @@ namespace Cassandra
                 }
             }
             var closestToken = _ring[i];
-            if (keyspaceName != null && _tokenToHostsByKeyspace.ContainsKey(keyspaceName))
+            if (keyspaceName != null)
             {
-                return _tokenToHostsByKeyspace[keyspaceName][closestToken];
+                Lazy<Dictionary<IToken, HashSet<Host>>> replicas;
+                if (_tokenToHostsByKeyspace.TryGetValue(keyspaceName, out replicas))
+                {
+                    return replicas.Value[closestToken];
+                }
             }
             return new Host[] { _primaryReplicas[closestToken] };
         }
