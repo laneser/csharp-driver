@@ -29,6 +29,7 @@ namespace Cassandra
     {
         private readonly static Logger _logger = new Logger(typeof(HostConnectionPool));
         private ConcurrentBag<Connection> _connections;
+        private ConcurrentQueue<Connection> _waitBorrowConnections;
         private readonly object _poolCreationLock = new object();
         private int _creating = 0;
 
@@ -61,6 +62,7 @@ namespace Cassandra
             Host.Down += OnHostDown;
             HostDistance = hostDistance;
             Configuration = configuration;
+            _waitBorrowConnections = new ConcurrentQueue<Connection>();
         }
 
         /// <summary>
@@ -69,15 +71,20 @@ namespace Cassandra
         /// </summary>
         public Connection BorrowConnection()
         {
+            Connection conn;
+            if (_waitBorrowConnections.TryDequeue(out conn))
+                return conn;
+
             MaybeCreateCorePool();
             if (_connections.Count == 0)
             {
                 //The load balancing policy stated no connections for this host
                 return null;
             }
-            var connection = _connections.OrderBy(c => c.InFlight).First();
-            MaybeSpawnNewConnection(connection.InFlight);
-            return connection;
+
+            var newconn = CreateConnection();
+            _connections.Add(newconn);
+            return newconn;
         }
 
         /// <exception cref="System.Net.Sockets.SocketException">Throws a SocketException when the connection could not be established with the host</exception>
@@ -91,8 +98,12 @@ namespace Cassandra
             if (Configuration.PoolingOptions.GetHeartBeatInterval() != null)
             {
                 //Heartbeat is enabled, subscribe for possible exceptions
-                c.OnIdleRequestException += OnIdleRequestException;   
+                c.OnIdleRequestException += OnIdleRequestException;
             }
+            c.OnPendingOpertionIdling = () =>
+            {
+                _waitBorrowConnections.Enqueue(c);
+            };
             return c;
         }
 
@@ -109,6 +120,8 @@ namespace Cassandra
             //Dispose all current connections
             //Connection allows multiple calls to Dispose
             var currentPool = _connections;
+            _connections = null;
+            _waitBorrowConnections = new ConcurrentQueue<Connection>();
             if (currentPool != null)
             {
                 foreach (var c in currentPool)

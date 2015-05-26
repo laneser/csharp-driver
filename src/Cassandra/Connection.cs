@@ -51,6 +51,9 @@ namespace Cassandra
         private ConcurrentStack<short> _freeOperations;
         /// <summary> Contains the requests that were sent through the wire and that hasn't been received yet.</summary>
         private ConcurrentDictionary<short, OperationState> _pendingOperations;
+
+        public Action OnPendingOpertionIdling = null;
+
         /// <summary> It contains the requests that could not be written due to streamIds not available</summary>
         private ConcurrentQueue<OperationState> _writeQueue;
         private int _canWriteNext = 1;
@@ -522,6 +525,10 @@ namespace Cassandra
                 _pendingOperations.TryRemove(state.Header.StreamId, out state);
                 //Release the streamId
                 _freeOperations.Push(state.Header.StreamId);
+
+                // notify pending operations is free.
+                if ((OnPendingOpertionIdling != null) && (_pendingOperations.Count == 0))
+                    OnPendingOpertionIdling();
             }
             try
             {
