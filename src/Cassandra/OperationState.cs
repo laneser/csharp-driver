@@ -109,7 +109,7 @@ namespace Cassandra
             }
             //Invoke the callback in a new thread in the thread pool
             //This way we don't let the user block on a thread used by the Connection
-            Task.Factory.StartNew(() => Callback(ex, response), CancellationToken.None, TaskCreationOptions.None, TaskScheduler.Default);
+            Task.Factory.StartNew(() => Callback(ex, response), CancellationToken.None, TaskCreationOptions.None, Cassandra.Tasks.ThreadRecycleScheduler.Default);
         }
     }
 }

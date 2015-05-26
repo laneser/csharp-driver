@@ -63,7 +63,7 @@ namespace Cassandra
         private volatile string _keyspace;
         private readonly object _keyspaceLock = new object();
         /// <summary> TaskScheduler used to handle write tasks</summary>
-        private readonly TaskScheduler _writeScheduler = new LimitedParallelismTaskScheduler(1);
+        private readonly TaskScheduler _writeScheduler = ThreadRecycleScheduler.Default;
         /// <summary>
         /// The event that represents a event RESPONSE from a Cassandra node
         /// </summary>
